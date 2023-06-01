@@ -6,6 +6,7 @@ import org.junit.Test;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Iterator;
 import java.util.List;
 import java.util.concurrent.ArrayBlockingQueue;
@@ -27,11 +28,9 @@ public class OrderBookTest {
         newOrders.add(new OrderMessage(OrderMessage.MessageType.New, new Order(6L, ASK, new BigDecimal("9.55"), 2L)));
     }
 
-    /**
-     * This test checks if the order book can handle data requests when empty.
-     */
+    // Tests the process starts up and is running, then closes it.
     @Test
-    public void emptyOrderBook() {
+    public void orderBookStartAndClose() {
         // Setup
         BlockingQueue<OrderMessage> queue = new ArrayBlockingQueue<>(100);
         OrderBook book = new OrderBook("VOD.L", queue);
@@ -40,15 +39,6 @@ public class OrderBookTest {
 
         // Process has started
         Assert.assertTrue(process.isAlive());
-
-        // Check L2 Data doesn't fail
-        Assert.assertEquals(BigDecimal.ZERO, book.getTopOfBook(BID));
-        Assert.assertEquals(BigDecimal.ZERO, book.getTopOfBook(ASK));
-        Assert.assertEquals(0, book.getBookDepth(BID));
-        Assert.assertEquals(0, book.getBookDepth(ASK));
-        Assert.assertEquals(0, book.getSizeForPriceLevel(BID, new BigDecimal("9.40")));
-        Assert.assertEquals(0, book.getSizeForPriceLevel(ASK, new BigDecimal("9.40")));
-        Assert.assertEquals(0, book.getSizeForPriceLevel(ASK, BigDecimal.ZERO));
 
         // Close order book
         queue.add(new OrderMessage(OrderMessage.MessageType.Close, Order.EMPTY));
@@ -64,20 +54,177 @@ public class OrderBookTest {
         Assert.assertFalse(process.isAlive());
     }
 
-    /**
-     * This test enters 6 orders and checks that they have been entered correctly.
-     * Then it checks if the BIDs and ASKs are sorted accordingly.
-     */
     @Test
-    public void orderBook() {
+    public void emptyOrderBook() {
         // Setup
         BlockingQueue<OrderMessage> queue = new ArrayBlockingQueue<>(100);
         OrderBook book = new OrderBook("VOD.L", queue);
         Thread process = new Thread(book);
         process.start();
 
-        // Process has started
-        Assert.assertTrue(process.isAlive());
+        Assert.assertTrue(book.orderMap.isEmpty());
+        Assert.assertTrue(book.buys.isEmpty());
+        Assert.assertTrue(book.sells.isEmpty());
+
+        // Close order book
+        queue.add(new OrderMessage(OrderMessage.MessageType.Close, Order.EMPTY));
+    }
+
+    @Test
+    public void ordersOnOrderBook() {
+        // Setup
+        BlockingQueue<OrderMessage> queue = new ArrayBlockingQueue<>(100);
+        OrderBook book = new OrderBook("VOD.L", queue);
+        Thread process = new Thread(book);
+        process.start();
+
+        // Send 6 orders (3 BID, 3 ASK)
+        queue.addAll(newOrders);
+
+        // Wait for orders to be processed
+        try {
+            waitForEmptyQueue(queue);
+        } catch (InterruptedException e) {
+            throw new RuntimeException(e);
+        }
+
+        Assert.assertEquals(6, book.orderMap.size());
+        Assert.assertEquals(3, book.buys.size());
+        Assert.assertEquals(3, book.sells.size());
+
+        // Close order book
+        queue.add(new OrderMessage(OrderMessage.MessageType.Close, Order.EMPTY));
+    }
+
+    @Test
+    public void bookDepthEmpty() {
+        // Setup
+        BlockingQueue<OrderMessage> queue = new ArrayBlockingQueue<>(100);
+        OrderBook book = new OrderBook("VOD.L", queue);
+        Thread process = new Thread(book);
+        process.start();
+
+        Assert.assertEquals(0, book.getBookDepth(BID));
+        Assert.assertEquals(0, book.getBookDepth(ASK));
+
+        // Close order book
+        queue.add(new OrderMessage(OrderMessage.MessageType.Close, Order.EMPTY));
+    }
+
+    @Test
+    public void hasBookDepth() {
+        // Setup
+        BlockingQueue<OrderMessage> queue = new ArrayBlockingQueue<>(100);
+        OrderBook book = new OrderBook("VOD.L", queue);
+        Thread process = new Thread(book);
+        process.start();
+
+        // Send 3 BID orders with 2 different price levels, 3 ASK orders with 3 different price levels
+        queue.addAll(newOrders);
+
+        // Wait for orders to be processed
+        try {
+            waitForEmptyQueue(queue);
+        } catch (InterruptedException e) {
+            throw new RuntimeException(e);
+        }
+
+        Assert.assertEquals(2, book.getBookDepth(BID));
+        Assert.assertEquals(3, book.getBookDepth(ASK));
+
+        // Close order book
+        queue.add(new OrderMessage(OrderMessage.MessageType.Close, Order.EMPTY));
+    }
+
+    @Test
+    public void topOfBookEmpty() {
+        // Setup
+        BlockingQueue<OrderMessage> queue = new ArrayBlockingQueue<>(100);
+        OrderBook book = new OrderBook("VOD.L", queue);
+        Thread process = new Thread(book);
+        process.start();
+
+        Assert.assertEquals(BigDecimal.ZERO, book.getTopOfBook(BID));
+        Assert.assertEquals(BigDecimal.ZERO, book.getTopOfBook(ASK));
+
+        // Close order book
+        queue.add(new OrderMessage(OrderMessage.MessageType.Close, Order.EMPTY));
+    }
+
+    @Test
+    public void hasTopOfBook() {
+        // Setup
+        BlockingQueue<OrderMessage> queue = new ArrayBlockingQueue<>(100);
+        OrderBook book = new OrderBook("VOD.L", queue);
+        Thread process = new Thread(book);
+        process.start();
+
+        // Send 1 BID with price level at
+        queue.add(newOrders.get(0));
+        // Send 1 ASK with price level at
+        queue.add(newOrders.get(4));
+        // Wait for orders to be processed
+        try {
+            waitForEmptyQueue(queue);
+        } catch (InterruptedException e) {
+            throw new RuntimeException(e);
+        }
+
+        Assert.assertEquals(new BigDecimal("9.40"), book.getTopOfBook(BID));
+        Assert.assertEquals(new BigDecimal("9.50"), book.getTopOfBook(ASK));
+
+        // Close order book
+        queue.add(new OrderMessage(OrderMessage.MessageType.Close, Order.EMPTY));
+    }
+
+    @Test
+    public void sizeForPriceLevelEmpty() {
+        // Setup
+        BlockingQueue<OrderMessage> queue = new ArrayBlockingQueue<>(100);
+        OrderBook book = new OrderBook("VOD.L", queue);
+        Thread process = new Thread(book);
+        process.start();
+
+        Assert.assertEquals(0, book.getSizeForPriceLevel(BID, new BigDecimal("9.40")));
+        Assert.assertEquals(0, book.getSizeForPriceLevel(ASK, new BigDecimal("9.40")));
+        Assert.assertEquals(0, book.getSizeForPriceLevel(ASK, BigDecimal.ZERO));
+
+        // Close order book
+        queue.add(new OrderMessage(OrderMessage.MessageType.Close, Order.EMPTY));
+    }
+
+    @Test
+    public void hasSizeForPriceLevel() {
+        // Setup
+        BlockingQueue<OrderMessage> queue = new ArrayBlockingQueue<>(100);
+        OrderBook book = new OrderBook("VOD.L", queue);
+        Thread process = new Thread(book);
+        process.start();
+
+        // Send 3 BID orders with 2 different price levels, 3 ASK orders with 3 different price levels
+        queue.addAll(newOrders);
+
+        // Wait for orders to be processed
+        try {
+            waitForEmptyQueue(queue);
+        } catch (InterruptedException e) {
+            throw new RuntimeException(e);
+        }
+
+        Assert.assertEquals(2, book.getSizeForPriceLevel(BID, new BigDecimal("9.40")));
+        Assert.assertEquals(1, book.getSizeForPriceLevel(ASK, new BigDecimal("9.50")));
+
+        // Close order book
+        queue.add(new OrderMessage(OrderMessage.MessageType.Close, Order.EMPTY));
+    }
+
+    @Test
+    public void orderBookIsSorted() {
+        // Setup
+        BlockingQueue<OrderMessage> queue = new ArrayBlockingQueue<>(100);
+        OrderBook book = new OrderBook("VOD.L", queue);
+        Thread process = new Thread(book);
+        process.start();
 
         // Send orders
         queue.addAll(newOrders);
@@ -88,14 +235,6 @@ public class OrderBookTest {
         } catch (InterruptedException e) {
             throw new RuntimeException(e);
         }
-
-        // Expected 3 BID and 3 ASK orders on book
-        Assert.assertEquals(2, book.getBookDepth(BID));
-        Assert.assertEquals(3, book.getBookDepth(ASK));
-        // Expected size of 2 at 9.40 (1L & 2L)
-        Assert.assertEquals(2, book.getSizeForPriceLevel(BID, new BigDecimal("9.40")));
-        // Expected size of 0 at 9.41
-        Assert.assertEquals(0, book.getSizeForPriceLevel(BID, new BigDecimal("9.41")));
 
         // Check the order book is sorted correctly for BIDs and ASKs
         Iterator<Order> orderIterator = book.buys.iterator();
@@ -115,42 +254,58 @@ public class OrderBookTest {
             }
         }
 
-        // Expected top of book for BID (9.40) and ASK (9.45)
-        Assert.assertEquals(new BigDecimal("9.40"), book.getTopOfBook(BID));
-        Assert.assertEquals(new BigDecimal("9.45"), book.getTopOfBook(ASK));
-
         // Close order book
         queue.add(new OrderMessage(OrderMessage.MessageType.Close, Order.EMPTY));
-
-        // Wait for message to be processed
-        try {
-            waitForEmptyQueue(queue);
-        } catch (InterruptedException e) {
-            throw new RuntimeException(e);
-        }
-
-        // Process is closed
-        Assert.assertFalse(process.isAlive());
     }
 
-    /**
-     * This test enters 6 orders, and tries to re-enter orderId(1) which will fail.
-     */
     @Test
-    public void enterOrders() {
+    public void enterSameOrders() {
         // Setup
         BlockingQueue<OrderMessage> queue = new ArrayBlockingQueue<>(100);
         OrderBook book = new OrderBook("VOD.L", queue);
         Thread process = new Thread(book);
         process.start();
 
-        // Process has started
-        Assert.assertTrue(process.isAlive());
+        Order order1L = new Order(1L, BID, new BigDecimal("9.40"), 10L);
 
-        // Send orders
-        queue.addAll(newOrders);
-        // Re-adding Order 1L (will fail)
-        queue.add(new OrderMessage(OrderMessage.MessageType.New, new Order(1L, BID, new BigDecimal("9.40"), 10L)));
+        // Send Order 1L
+        queue.add(new OrderMessage(OrderMessage.MessageType.New, order1L));
+        // Wait for orders to be processed
+        try {
+            waitForEmptyQueue(queue);
+        } catch (InterruptedException e) {
+            throw new RuntimeException(e);
+        }
+
+        order1L.setQuantity(20L);
+        Assert.assertEquals(order1L.getOrderId(), book.orderMap.get(1L).getOrderId());
+
+        // Send Order 1L again
+        queue.add(new OrderMessage(OrderMessage.MessageType.New, order1L));
+        // Wait for orders to be processed
+        try {
+            waitForEmptyQueue(queue);
+        } catch (InterruptedException e) {
+            throw new RuntimeException(e);
+        }
+
+        Assert.assertEquals(1, book.orderMap.size());
+        Assert.assertEquals(10L, book.orderMap.get(1L).getQuantity());
+
+        // Close order book
+        queue.add(new OrderMessage(OrderMessage.MessageType.Close, Order.EMPTY));
+    }
+
+    @Test
+    public void amendOrderQuantity() {
+        // Setup
+        BlockingQueue<OrderMessage> queue = new ArrayBlockingQueue<>(100);
+        OrderBook book = new OrderBook("VOD.L", queue);
+        Thread process = new Thread(book);
+        process.start();
+
+        // Send order 5L
+        queue.add(newOrders.get(4));
 
         // Wait for orders to be processed
         try {
@@ -159,45 +314,11 @@ public class OrderBookTest {
             throw new RuntimeException(e);
         }
 
-        // Expected 3 BID and 3 ASK orders on book, only 2 at 9.40 (1L & 2L)
-        Assert.assertEquals(2, book.getBookDepth(BID));
-        Assert.assertEquals(3, book.getBookDepth(ASK));
-        Assert.assertEquals(2, book.getSizeForPriceLevel(BID, new BigDecimal("9.40")));
-        Assert.assertEquals(new BigDecimal("9.40"), book.getTopOfBook(BID));
-        Assert.assertEquals(new BigDecimal("9.45"), book.getTopOfBook(ASK));
+        // Order before amendment
+        Assert.assertEquals(5L, book.orderMap.get(5L).getQuantity());
 
-
-        // Close order book
-        queue.add(new OrderMessage(OrderMessage.MessageType.Close, Order.EMPTY));
-
-        // Wait for message to be processed
-        try {
-            waitForEmptyQueue(queue);
-        } catch (InterruptedException e) {
-            throw new RuntimeException(e);
-        }
-
-        // Process is closed
-        Assert.assertFalse(process.isAlive());
-    }
-
-    /**
-     * This test enters 6 orders, amends the price on OrderId(6), amends the quantity on OrderId(5),
-     * amends the price and quantity on OrderId(4), then tries to amend OrderId(0) which does not exist.
-     */
-    @Test
-    public void amendOrders() {
-        // Setup
-        BlockingQueue<OrderMessage> queue = new ArrayBlockingQueue<>(100);
-        OrderBook book = new OrderBook("VOD.L", queue);
-        Thread process = new Thread(book);
-        process.start();
-
-        // Process has started
-        Assert.assertTrue(process.isAlive());
-
-        // Send orders
-        queue.addAll(newOrders);
+        // Amend Order 5L to quantity to 7L
+        queue.add(new OrderMessage(OrderMessage.MessageType.Amend, new Order(5L, ASK, new BigDecimal("9.50"), 7L)));
 
         // Wait for orders to be processed
         try {
@@ -205,13 +326,188 @@ public class OrderBookTest {
         } catch (InterruptedException e) {
             throw new RuntimeException(e);
         }
+
+        // Order after amendment
+        Assert.assertEquals(7L, book.orderMap.get(5L).getQuantity());
+
+        // Close order book
+        queue.add(new OrderMessage(OrderMessage.MessageType.Close, Order.EMPTY));
+    }
+
+    @Test
+    public void amendOrderPrice() {
+        // Setup
+        BlockingQueue<OrderMessage> queue = new ArrayBlockingQueue<>(100);
+        OrderBook book = new OrderBook("VOD.L", queue);
+        Thread process = new Thread(book);
+        process.start();
+
+        // Send order 6L
+        queue.add(newOrders.get(5));
+
+        // Wait for orders to be processed
+        try {
+            waitForEmptyQueue(queue);
+        } catch (InterruptedException e) {
+            throw new RuntimeException(e);
+        }
+
+        // Order before amendment
+        Assert.assertEquals(new BigDecimal("9.55"), book.orderMap.get(6L).getPrice());
 
         // Amend Order 6L to price of 9.50
         queue.add(new OrderMessage(OrderMessage.MessageType.Amend, new Order(6L, ASK, new BigDecimal("9.50"), 2L)));
-        // Amend Order 5L to quantity to 7L
-        queue.add(new OrderMessage(OrderMessage.MessageType.Amend, new Order(5L, ASK, new BigDecimal("9.50"), 7L)));
-        // Amend Order 4L price to 9.42 and quantity to 9L
+
+        // Wait for orders to be processed
+        try {
+            waitForEmptyQueue(queue);
+        } catch (InterruptedException e) {
+            throw new RuntimeException(e);
+        }
+
+        // Order after amendment
+        Assert.assertEquals(new BigDecimal("9.50"), book.orderMap.get(6L).getPrice());
+
+        // Close order book
+        queue.add(new OrderMessage(OrderMessage.MessageType.Close, Order.EMPTY));
+    }
+
+    @Test
+    public void amendOrderQuantityAndPrice() {
+        // Setup
+        BlockingQueue<OrderMessage> queue = new ArrayBlockingQueue<>(100);
+        OrderBook book = new OrderBook("VOD.L", queue);
+        Thread process = new Thread(book);
+        process.start();
+
+        // Send order 4L
+        queue.add(newOrders.get(3));
+
+        // Wait for orders to be processed
+        try {
+            waitForEmptyQueue(queue);
+        } catch (InterruptedException e) {
+            throw new RuntimeException(e);
+        }
+
+        // Orders before amendments
+        Assert.assertEquals(new BigDecimal("9.45"), book.orderMap.get(4L).getPrice());
+        Assert.assertEquals(10L, book.orderMap.get(4L).getQuantity());
+
+        // Amend order 4L to 9.42 price and 9 quantity
         queue.add(new OrderMessage(OrderMessage.MessageType.Amend, new Order(4L, ASK, new BigDecimal("9.42"), 9L)));
+
+        // Wait for orders to be processed
+        try {
+            waitForEmptyQueue(queue);
+        } catch (InterruptedException e) {
+            throw new RuntimeException(e);
+        }
+
+        // Orders after amendments
+        Assert.assertEquals(new BigDecimal("9.42"), book.orderMap.get(4L).getPrice());
+        Assert.assertEquals(9L, book.orderMap.get(4L).getQuantity());
+
+        // Close order book
+        queue.add(new OrderMessage(OrderMessage.MessageType.Close, Order.EMPTY));
+    }
+
+    @Test
+    public void invalidAmendPrice() {
+        // Setup
+        BlockingQueue<OrderMessage> queue = new ArrayBlockingQueue<>(100);
+        OrderBook book = new OrderBook("VOD.L", queue);
+        Thread process = new Thread(book);
+        process.start();
+
+        // Send orders 4L & 6L
+        queue.addAll(Arrays.asList(newOrders.get(3), newOrders.get(5)));
+
+        // Wait for orders to be processed
+        try {
+            waitForEmptyQueue(queue);
+        } catch (InterruptedException e) {
+            throw new RuntimeException(e);
+        }
+
+        // Order before amendments
+        Assert.assertEquals(new BigDecimal("9.55"), book.orderMap.get(6L).getPrice());
+        Assert.assertEquals(new BigDecimal("9.45"), book.orderMap.get(4L).getPrice());
+
+        // Amend Order 6L to price of 0
+        queue.add(new OrderMessage(OrderMessage.MessageType.Amend, new Order(6L, ASK, new BigDecimal("0"), 2L)));
+        // Amend Order 4L price to -9.60
+        queue.add(new OrderMessage(OrderMessage.MessageType.Amend, new Order(4L, ASK, new BigDecimal("-9.60"), 10L)));
+
+
+        // Wait for orders to be processed
+        try {
+            waitForEmptyQueue(queue);
+        } catch (InterruptedException e) {
+            throw new RuntimeException(e);
+        }
+
+        // Order amendments have not taken place
+        Assert.assertEquals(new BigDecimal("9.55"), book.orderMap.get(6L).getPrice());
+        Assert.assertEquals(new BigDecimal("9.45"), book.orderMap.get(4L).getPrice());
+
+        // Close order book
+        queue.add(new OrderMessage(OrderMessage.MessageType.Close, Order.EMPTY));
+    }
+
+    @Test
+    public void invalidAmendQuantity() {
+        // Setup
+        BlockingQueue<OrderMessage> queue = new ArrayBlockingQueue<>(100);
+        OrderBook book = new OrderBook("VOD.L", queue);
+        Thread process = new Thread(book);
+        process.start();
+
+        // Send orders 3L & 5L
+        queue.addAll(Arrays.asList(newOrders.get(2), newOrders.get(4)));
+
+        // Wait for orders to be processed
+        try {
+            waitForEmptyQueue(queue);
+        } catch (InterruptedException e) {
+            throw new RuntimeException(e);
+        }
+
+        // Order before amendment message
+        Assert.assertEquals(5L, book.orderMap.get(5L).getQuantity());
+        Assert.assertEquals(2L, book.orderMap.get(3L).getQuantity());
+
+        // Amend Order 5L to quantity to 0
+        queue.add(new OrderMessage(OrderMessage.MessageType.Amend, new Order(5L, ASK, new BigDecimal("9.50"), 0L)));
+        // Amend Order 3L quantity to -10
+        queue.add(new OrderMessage(OrderMessage.MessageType.Amend, new Order(3L, BID, new BigDecimal("9.35"), -10L)));
+
+        // Wait for orders to be processed
+        try {
+            waitForEmptyQueue(queue);
+        } catch (InterruptedException e) {
+            throw new RuntimeException(e);
+        }
+
+        // Order amendments have not taken place
+        Assert.assertEquals(5L, book.orderMap.get(5L).getQuantity());
+        Assert.assertEquals(2L, book.orderMap.get(3L).getQuantity());
+
+        // Close order book
+        queue.add(new OrderMessage(OrderMessage.MessageType.Close, Order.EMPTY));
+    }
+
+    @Test
+    public void amendNonExistentOrder() {
+        // Setup
+        BlockingQueue<OrderMessage> queue = new ArrayBlockingQueue<>(100);
+        OrderBook book = new OrderBook("VOD.L", queue);
+        Thread process = new Thread(book);
+        process.start();
+
+        // Order book is still empty
+        Assert.assertTrue(book.orderMap.isEmpty());
+
         // Amend in-existing order 0L at new price level
         queue.add(new OrderMessage(OrderMessage.MessageType.Amend, new Order(0L, ASK, new BigDecimal("9.70"), 2L)));
 
@@ -222,44 +518,23 @@ public class OrderBookTest {
             throw new RuntimeException(e);
         }
 
-        // Expected only 9.42 (4L) and 9.50 (5L & 6L) to be the book depth for order book (0L doesn't exist)
-        Assert.assertEquals(2, book.getBookDepth(ASK));
-        Assert.assertEquals(0, book.getSizeForPriceLevel(ASK, new BigDecimal("9.45")));
-        Assert.assertEquals(0, book.getSizeForPriceLevel(ASK, new BigDecimal("9.55")));
-        Assert.assertEquals(0, book.getSizeForPriceLevel(ASK, new BigDecimal("9.70")));
-        Assert.assertEquals(1, book.getSizeForPriceLevel(ASK, new BigDecimal("9.42")));
-        Assert.assertEquals(2, book.getSizeForPriceLevel(ASK, new BigDecimal("9.50")));
+        // Order book is still empty
+        Assert.assertTrue(book.orderMap.isEmpty());
 
         // Close order book
         queue.add(new OrderMessage(OrderMessage.MessageType.Close, Order.EMPTY));
-
-        // Wait for message to be processed
-        try {
-            waitForEmptyQueue(queue);
-        } catch (InterruptedException e) {
-            throw new RuntimeException(e);
-        }
-
-        // Process is closed
-        Assert.assertFalse(process.isAlive());
     }
 
-    /**
-     * This test enters 6 orders and cancels OrderId(4). Then tries to cancel OrderId(0), which doesn't exist.
-     */
     @Test
-    public void cancelOrders() {
+    public void cancelOrder() {
         // Setup
         BlockingQueue<OrderMessage> queue = new ArrayBlockingQueue<>(100);
         OrderBook book = new OrderBook("VOD.L", queue);
         Thread process = new Thread(book);
         process.start();
 
-        // Process has started
-        Assert.assertTrue(process.isAlive());
-
-        // Send orders
-        queue.addAll(newOrders);
+        // Send order 4L
+        queue.add(newOrders.get(3));
 
         // Wait for orders to be processed
         try {
@@ -268,9 +543,38 @@ public class OrderBookTest {
             throw new RuntimeException(e);
         }
 
+        // Order book is not empty
+        Assert.assertFalse(book.orderMap.isEmpty());
+
         // Cancel Order 4L
         queue.add(new OrderMessage(OrderMessage.MessageType.Cancel, new Order(4L, ASK, new BigDecimal("9.45"), 10L)));
-        // Cancel in-existing order 0L
+
+        // Wait for orders to be processed
+        try {
+            waitForEmptyQueue(queue);
+        } catch (InterruptedException e) {
+            throw new RuntimeException(e);
+        }
+
+        // Order book is now empty
+        Assert.assertTrue(book.orderMap.isEmpty());
+
+        // Close order book
+        queue.add(new OrderMessage(OrderMessage.MessageType.Close, Order.EMPTY));
+    }
+
+    @Test
+    public void cancelNonExistentOrder() {
+        // Setup
+        BlockingQueue<OrderMessage> queue = new ArrayBlockingQueue<>(100);
+        OrderBook book = new OrderBook("VOD.L", queue);
+        Thread process = new Thread(book);
+        process.start();
+
+        // Order book is empty
+        Assert.assertTrue(book.orderMap.isEmpty());
+
+        // Cancel non-existent order 0L
         queue.add(new OrderMessage(OrderMessage.MessageType.Cancel, new Order(0L, ASK, new BigDecimal("9.50"), 5L)));
 
         // Wait for orders to be processed
@@ -280,42 +584,23 @@ public class OrderBookTest {
             throw new RuntimeException(e);
         }
 
-        // Expected only 9.50 (5L) & 9.55 (6L) to be the book depth for order book
-        Assert.assertEquals(2, book.getBookDepth(ASK));
-        Assert.assertEquals(0, book.getSizeForPriceLevel(ASK, new BigDecimal("9.45")));
-        Assert.assertEquals(1, book.getSizeForPriceLevel(ASK, new BigDecimal("9.50")));
-        Assert.assertEquals(1, book.getSizeForPriceLevel(ASK, new BigDecimal("9.55")));
+        // Order book is still empty and up
+        Assert.assertTrue(book.orderMap.isEmpty());
 
         // Close order book
         queue.add(new OrderMessage(OrderMessage.MessageType.Close, Order.EMPTY));
-
-        // Wait for message to be processed
-        try {
-            waitForEmptyQueue(queue);
-        } catch (InterruptedException e) {
-            throw new RuntimeException(e);
-        }
-
-        // Process is closed
-        Assert.assertFalse(process.isAlive());
     }
 
-    /**
-     * This test enters 6 orders and trades OrderId(1) 2 volume, then 8 volume, thus removing it from the depth.
-     * Then, it tries to trade on an order for more than the available quantity, thus being rejected.
-     */
     @Test
-    public void tradeOrders() {
+    public void tradeSomeQuantity() {
         // Setup
         BlockingQueue<OrderMessage> queue = new ArrayBlockingQueue<>(100);
         OrderBook book = new OrderBook("VOD.L", queue);
         Thread process = new Thread(book);
         process.start();
-        // Process has started
-        Assert.assertTrue(process.isAlive());
 
-        // Send orders
-        queue.addAll(newOrders);
+        // Send order 1L
+        queue.add(newOrders.get(0));
 
         // Wait for orders to be processed
         try {
@@ -323,14 +608,11 @@ public class OrderBookTest {
         } catch (InterruptedException e) {
             throw new RuntimeException(e);
         }
+
+        Assert.assertEquals(10L, book.orderMap.get(1L).getQuantity());
 
         // Trade some volume on order 1L
         queue.add(new OrderMessage(OrderMessage.MessageType.Trade, new Order(1L, BID, new BigDecimal("9.40"), 2L)));
-        // Trade remaining volume on order 1L
-        queue.add(new OrderMessage(OrderMessage.MessageType.Trade, new Order(1L, BID, new BigDecimal("9.40"), 8L)));
-        // Trade too much volume on order 2L
-        queue.add(new OrderMessage(OrderMessage.MessageType.Trade, new Order(2L, BID, new BigDecimal("9.40"), 6L)));
-
 
         // Wait for orders to be processed
         try {
@@ -339,26 +621,101 @@ public class OrderBookTest {
             throw new RuntimeException(e);
         }
 
-        // Expected only 2L (9.40) & 3L (9.35) on BID order book
-        Assert.assertEquals(2, book.getBookDepth(BID));
-        Assert.assertEquals(1, book.getSizeForPriceLevel(BID, new BigDecimal("9.40")));
-        Assert.assertEquals(1, book.getSizeForPriceLevel(BID, new BigDecimal("9.35")));
+        // Order has 8 quantity left after trading 2
+        Assert.assertEquals(8L, book.orderMap.get(1L).getQuantity());
 
         // Close order book
         queue.add(new OrderMessage(OrderMessage.MessageType.Close, Order.EMPTY));
+    }
 
-        // Wait for message to be processed
+    @Test
+    public void multiTradeOrder() {
+        // Setup
+        BlockingQueue<OrderMessage> queue = new ArrayBlockingQueue<>(100);
+        OrderBook book = new OrderBook("VOD.L", queue);
+        Thread process = new Thread(book);
+        process.start();
+
+        // Send order 1L
+        queue.add(newOrders.get(0));
+
+        // Wait for orders to be processed
         try {
             waitForEmptyQueue(queue);
         } catch (InterruptedException e) {
             throw new RuntimeException(e);
         }
 
-        // Process is closed
-        Assert.assertFalse(process.isAlive());
+        Assert.assertEquals(10L, book.orderMap.get(1L).getQuantity());
+
+        // Trade some volume on order 1L
+        queue.add(new OrderMessage(OrderMessage.MessageType.Trade, new Order(1L, BID, new BigDecimal("9.40"), 2L)));
+
+        // Wait for orders to be processed
+        try {
+            waitForEmptyQueue(queue);
+        } catch (InterruptedException e) {
+            throw new RuntimeException(e);
+        }
+
+        // Order has 8 quantity left after trading 2
+        Assert.assertEquals(8L, book.orderMap.get(1L).getQuantity());
+
+        // Trade some volume on order 1L
+        queue.add(new OrderMessage(OrderMessage.MessageType.Trade, new Order(1L, BID, new BigDecimal("9.40"), 4L)));
+
+        // Wait for orders to be processed
+        try {
+            waitForEmptyQueue(queue);
+        } catch (InterruptedException e) {
+            throw new RuntimeException(e);
+        }
+
+        // Order has 4 quantity left after trading 4
+        Assert.assertEquals(4L, book.orderMap.get(1L).getQuantity());
+
+        // Close order book
+        queue.add(new OrderMessage(OrderMessage.MessageType.Close, Order.EMPTY));
     }
 
-    public void waitForEmptyQueue(BlockingQueue<OrderMessage> queue) throws InterruptedException {
+    @Test
+    public void tradeAllQuantity() {
+        // Setup
+        BlockingQueue<OrderMessage> queue = new ArrayBlockingQueue<>(100);
+        OrderBook book = new OrderBook("VOD.L", queue);
+        Thread process = new Thread(book);
+        process.start();
+
+        // Send order 1L
+        queue.add(newOrders.get(0));
+
+        // Wait for orders to be processed
+        try {
+            waitForEmptyQueue(queue);
+        } catch (InterruptedException e) {
+            throw new RuntimeException(e);
+        }
+
+        Assert.assertEquals(10L, book.orderMap.get(1L).getQuantity());
+
+        // Trade all volume on order 1L
+        queue.add(new OrderMessage(OrderMessage.MessageType.Trade, new Order(1L, BID, new BigDecimal("9.40"), 10L)));
+
+        // Wait for orders to be processed
+        try {
+            waitForEmptyQueue(queue);
+        } catch (InterruptedException e) {
+            throw new RuntimeException(e);
+        }
+
+        // Order was removed from book aftre being fully filled
+        Assert.assertTrue(book.orderMap.isEmpty());
+
+        // Close order book
+        queue.add(new OrderMessage(OrderMessage.MessageType.Close, Order.EMPTY));
+    }
+
+    private void waitForEmptyQueue(BlockingQueue<OrderMessage> queue) throws InterruptedException {
         while (!queue.isEmpty()) {
             System.out.println("Sleeping...");
             Thread.sleep(50);
